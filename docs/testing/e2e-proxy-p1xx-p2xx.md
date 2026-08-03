@@ -300,3 +300,45 @@
 **验收标准**: 流式响应包含 `data:` 和 `[DONE]`。
 
 ---
+
+### P209 — Direct 模式额外字段剥离
+
+**目的**: DirectPipeline 下 vLLM 返回的 `routed_experts`（MoE 路由元数据）不暴露给客户端；r3offload 开启后轨迹中存为 marker。
+
+| 步骤 | 操作 |
+|---|---|
+| 1 | 启动 Mock 服务，注册 Direct 模式模型 |
+| 2 | 发送非流式/流式请求 |
+| 3 | 查询轨迹验证 routed_experts 为 marker |
+
+**验收标准**: 客户端响应不含 routed_experts；轨迹 raw_response 中为 marker，可回拉（闭环由 P502/P503 验证）。
+
+---
+
+### P210 — TITO 模式额外字段存储
+
+**目的**: TokenPipeline(TITO) 下 `routed_experts` 不暴露给客户端；r3offload 开启后轨迹 token_response 中存为 marker。
+
+| 步骤 | 操作 |
+|---|---|
+| 1 | 启动 Mock 服务，注册 TITO 模式模型 |
+| 2 | 发送非流式/流式请求 |
+| 3 | 查询轨迹验证 routed_experts 为 marker |
+
+**验收标准**: 客户端响应不含 routed_experts；轨迹 token_response 中为 marker，可回拉（闭环由 P502/P503 验证）。
+
+---
+
+### P211 — 空 think 内容非流式场景
+
+**目的**: 防止"模型推理输出 think 内容为空时 `</think>` 落入 content"的回归（非流式路径 openai_builder 对 `extract_reasoning` 返回值做 truthy 检查导致）。
+
+| 步骤 | 操作 |
+|---|---|
+| 1 | 启动 Mock 服务（端口 19999），注册 TITO + reasoning_parser 模型（model 名含 `empty-think` 触发 Mock 返回 `<think></think>你好`） |
+| 2 | 发送非流式请求 |
+| 3 | 删除模型 |
+
+**验收标准**: HTTP 200；响应 content 为 `你好`，且不含 `<think>`/`</think>` 标记。
+
+---
