@@ -83,7 +83,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         # 返回 reasoning-free 的 content，供 tool parser 在干净文本上解析。
         # 此顺序确保 tool XML 标记（┐┌ 等）不会泄漏到 reasoning_content。
         try:
-            extracted_reasoning, extracted_content = active_parser.extract_reasoning(
+            extracted_reasoning, extracted_content = self.parser.extract_reasoning(
                 content, context.raw_request
             )
             # 对齐 vLLM v0.16.0 chat_completion/serving.py:1496-1504：
