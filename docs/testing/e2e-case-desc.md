@@ -11,13 +11,13 @@
 |---|---|---|---|---|
 | — | [e2e-framework.md](e2e-framework.md) | 测试框架概述：层架构、命名规范、断言工具、缓存递增规则、全局配置、服务地址 | — | — |
 | 1 | [e2e-nginx.md](e2e-nginx.md) | Nginx 入口层 | 2 | N101-N102 |
-| 2 | [e2e-proxy-p1xx-p2xx.md](e2e-proxy-p1xx-p2xx.md) | Proxy 直连层：API 与模型管理 | 19 | P101-P111, P201-P208 |
+| 2 | [e2e-proxy-p1xx-p2xx.md](e2e-proxy-p1xx-p2xx.md) | Proxy 直连层：API 与模型管理 | 22 | P101-P111, P201-P211 |
 | 3 | [e2e-proxy-p3xx.md](e2e-proxy-p3xx.md) | Proxy 直连层：轨迹与数据一致性 | 9 | P301-P309 |
 | 4 | [e2e-proxy-p4xx.md](e2e-proxy-p4xx.md) | Proxy 直连层：缓存命中验证 | 11 | P401-P411 |
 | 5 | [e2e-archive.md](e2e-archive.md) | 归档调度层 | 4 | A100-A103 |
 | 6 | [e2e-comparison.md](e2e-comparison.md) | 对比测试层：vLLM vs Proxy 响应对比 | 14 | C101-C107, C201-C207 |
 | 7 | [e2e-performance.md](e2e-performance.md) | 性能测试层：稳定性、并发、流式并发 | 3 | T101-T103 |
-| **合计** | | | **62** | |
+| **合计** | | | **65** | |
 
 ---
 

@@ -83,15 +83,21 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         # 返回 reasoning-free 的 content，供 tool parser 在干净文本上解析。
         # 此顺序确保 tool XML 标记（┐┌ 等）不会泄漏到 reasoning_content。
         try:
-            include_reasoning = context.request_params.get("include_reasoning", True)
-            if include_reasoning:
-                extracted_reasoning, extracted_content = self.parser.extract_reasoning(
-                    content, context.raw_request
-                )
-                if extracted_reasoning:
-                    reasoning = extracted_reasoning
-                    final_content = extracted_content
-                    logger.debug(f"[{context.unique_id}] 解析到推理内容，长度: {len(reasoning)}")
+            extracted_reasoning, extracted_content = active_parser.extract_reasoning(
+                content, context.raw_request
+            )
+            # 对齐 vLLM v0.16.0 chat_completion/serving.py:1496-1504：
+            # extract_reasoning 返回值无条件使用，不做 truthy 检查。
+            # 空 think（reasoning=""）时若跳过赋值，final_content 会保留
+            # 原始输出导致 </think> 泄漏进 content；
+            # include_reasoning=False 时也仅置 reasoning 为 None，
+            # content 仍取解析后的干净文本（vLLM 同款行为）。
+            reasoning = extracted_reasoning
+            final_content = extracted_content
+            if not context.request_params.get("include_reasoning", True):
+                reasoning = None
+            if reasoning:
+                logger.debug(f"解析到推理内容，长度: {len(reasoning)}")
         except Exception as e:
             logger.warning(f"[{context.unique_id}] 推理解析失败: {e}\n{traceback.format_exc()}")
 

@@ -539,7 +539,11 @@ run_scenarios_parallel() {
             fi
             local sn=$(basename "${matched_files[0]}" .sh)
             local log_file="${serial_log_dir}/$(printf '%03d' $serial_idx)_${sn}.log"
-            if _run_single_scenario "$layer_name" "${matched_files[0]}" "$log_file" 2>&1 | tee "$log_file"; then
+            # 注意：不能用 `if cmd | tee` 直接判断（无 pipefail 时退出码来自 tee），
+            # 失败场景会被误计为通过。与并发模式一致，显式取 PIPESTATUS[0]。
+            _run_single_scenario "$layer_name" "${matched_files[0]}" "$log_file" 2>&1 | tee "$log_file"
+            local scenario_rc=${PIPESTATUS[0]}
+            if [ "$scenario_rc" -eq 0 ]; then
                 passed=$((passed + 1))
             else
                 failed=$((failed + 1))
