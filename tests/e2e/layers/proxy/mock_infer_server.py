@@ -226,6 +226,26 @@ class MockInferHandler(BaseHTTPRequestHandler):
         """处理非流式completion请求（TITO模式）"""
         model = body.get('model', 'mock-model')
 
+        # E2E P211 空 think 场景：模型输出 <think></think> 前缀（think 内容为空）。
+        # TITO 模式 proxy 请求固定带 return_token_ids=True；此分支返回纯文本且
+        # 不带 token_ids 字段，proxy 的 _decode_response 会回退到文本路径，
+        # 使非流式 openai_builder 走 extract_reasoning 提取（触发空 think 泄漏回归）。
+        if "empty-think" in model:
+            choice = {
+                "index": 0,
+                "text": "<think></think>你好",
+                "finish_reason": "stop"
+            }
+            self._send_json_response({
+                "id": "cmpl-mock",
+                "object": "text_completion",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [choice],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+            })
+            return
+
         # 构建choice
         choice = {
             "index": 0,
