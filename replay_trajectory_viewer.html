@@ -732,7 +732,7 @@
 
     .dag-node {
         position: absolute;
-        width: 70px;
+        width: 36px;
         height: 44px;
         border-radius: 8px;
         background: var(--bg-card);
@@ -741,7 +741,7 @@
         justify-content: center;
         cursor: pointer;
         font-weight: 700;
-        font-size: 14px;
+        font-size: 11px;
         transition: transform 0.15s, box-shadow 0.15s;
         z-index: 1;
     }
@@ -2956,7 +2956,8 @@ function buildRelationGraph(records) {
         hasError: !!r.error,
         children: [],
         parents: [],
-        configGroup: -1 // 待分配
+        configGroup: -1, // 待分配
+        startTime: r.start_time || '' // 节点起始时间（用于时间轴横向定位）
     }));
 
     const edges = [];
@@ -3059,6 +3060,7 @@ function renderDAG(graph) {
     // 清空现有内容
     container.querySelectorAll('.dag-node').forEach(el => el.remove());
     container.querySelectorAll('.dag-legend').forEach(el => el.remove());
+    container.querySelectorAll('.dag-time-axis').forEach(el => el.remove());
     svg.querySelectorAll('path').forEach(el => el.remove());
     // 清空旧 marker，准备动态创建
     const defs = svg.querySelector('defs');
@@ -3094,17 +3096,16 @@ function renderDAG(graph) {
         defs.appendChild(marker);
     });
 
-    // 计算布局：使用简单的层级布局
-    const layout = computeLayout(graph);
+    // 计算布局：横轴按 start_time 时间定位，纵轴按树形结构分行
+    const layout = computeTimeLayout(graph);
 
-    const nodeWidth = 70;
+    const nodeWidth = 36;
     const nodeHeight = 44;
-    const horizontalGap = 30;
     const verticalGap = 50;
 
     layout.positions.forEach((pos, idx) => {
         const node = graph.nodes[idx];
-        const x = pos.level * (nodeWidth + horizontalGap) + 40;
+        const x = pos.x; // 时间比例计算得到的像素横坐标
         const y = pos.row * (nodeHeight + verticalGap) + 40;
 
         const configColor = CONFIG_COLORS[node.configGroup] || CONFIG_COLORS[0];
@@ -3130,28 +3131,50 @@ function renderDAG(graph) {
         nodeEl.id = `dag-node-${idx}`;
         container.appendChild(nodeEl);
 
-        // 存储位置信息用于绘制连线（右→左水平连接，从根本上杜绝穿越节点）
+        // 存储位置信息用于绘制连线
         node._rightX = x + nodeWidth;           // 右侧（出边起点）
         node._leftX = x;                        // 左侧（入边终点）
         node._centerY = y + nodeHeight / 2;     // 垂直中心
+        node._bottomX = x + nodeWidth / 2;      // 底部中心（分叉出边起点）
+        node._bottomY = y + nodeHeight;         // 底部 Y 坐标
     });
 
-    // 渲染连线（前后轮对话关系，右→左水平连接）
-    // 连线从父节点右侧到子节点左侧，仅经过层间间隙（无节点的空白区域），根本杜绝穿越
+    // 渲染连线（前后轮对话关系）
+    // 分叉边：父节点底部 → 子节点左侧（从下方出发，视觉区分分叉）
+    // 同边边：父节点右侧 → 子节点左侧（水平连接）
     graph.edges.forEach(edge => {
         const fromNode = graph.nodes[edge.from];
         const toNode = graph.nodes[edge.to];
 
         if (fromNode._rightX === undefined) return;
 
-        const fromX = fromNode._rightX;     // 父节点右侧
-        const fromY = fromNode._centerY;    // 父节点垂直中心
         const toX = toNode._leftX;          // 子节点左侧
         const toY = toNode._centerY;        // 子节点垂直中心
 
-        // 水平 S 曲线：控制在层间间隙中过渡，不会穿过任何节点
-        const midX = (fromX + toX) / 2;
-        const pathData = `M${fromX},${fromY} C${midX},${fromY} ${midX},${toY} ${toX},${toY}`;
+        // 判断是否为分叉：父节点有多个子节点
+        const isFork = graph.nodes[edge.from].children.length > 1;
+        // 判断是否换行：父与子不在同一行
+        const parentRow = fromNode._centerY;
+        const childRow = toNode._centerY;
+        const rowChanged = Math.abs(parentRow - childRow) > 1;
+
+        let fromX, fromY, pathData;
+
+        if (isFork && rowChanged) {
+            // 分叉且换行：从父节点底部中心出发
+            fromX = fromNode._bottomX;
+            fromY = fromNode._bottomY;
+            // 先向下延伸，再水平过渡，最后到达子节点左侧
+            const dropY = fromY + 20;  // 向下延伸 20px
+            const midX = (fromX + toX) / 2;
+            pathData = `M${fromX},${fromY} L${fromX},${dropY} C${midX},${dropY} ${midX},${toY} ${toX},${toY}`;
+        } else {
+            // 同边或换行但不分叉：从父节点右侧出发
+            fromX = fromNode._rightX;
+            fromY = fromNode._centerY;
+            const midX = (fromX + toX) / 2;
+            pathData = `M${fromX},${fromY} C${midX},${fromY} ${midX},${toY} ${toX},${toY}`;
+        }
 
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', pathData);
@@ -3206,89 +3229,201 @@ function renderDAG(graph) {
     legendEl.innerHTML = legendHtml;
     container.appendChild(legendEl);
 
-    // 更新容器大小
-    const maxX = Math.max(...layout.positions.map(p => p.level)) * (nodeWidth + horizontalGap) + 200;
-    const maxY = Math.max(...layout.positions.map(p => p.row)) * (nodeHeight + verticalGap) + 150;
+    // 更新容器大小（横轴按时间像素位置取最大值，底部预留时间轴空间）
+    const maxNodeX = Math.max(...layout.positions.map(p => p.x)) + nodeWidth;
+    const maxRowTop = Math.max(...layout.positions.map(p => p.row)) * (nodeHeight + verticalGap) + 40;
+    const axisY = maxRowTop + nodeHeight + 20; // 时间轴位于节点下方
+    const maxX = maxNodeX + 80; // 右侧留白
+    const maxY = axisY + 50; // 底部留白 + 时间轴高度
     container.style.width = `${Math.max(maxX, 400)}px`;
     container.style.height = `${Math.max(maxY, 300)}px`;
+
+    // 渲染时间轴（仅在存在真实时间跨度时绘制）
+    if (layout.maxSpread !== undefined && layout.maxTime > layout.minTime) {
+        renderTimeAxis(container, layout, axisY);
+    }
 }
 
 /**
- * 计算布局位置（树形布局：子节点优先与父同行，多子节点分行，总行数=叶子数）
- * 返回: { positions: [{ level, row }] }
+ * 计算布局位置（时间布局：横轴按 start_time 时间比例定位，纵轴按树形结构分行）
+ * - X 轴：按节点 start_time 解析为时间戳，做时间比例映射，并保证相邻节点（按时间排序）最小水平间距
+ * - Y 轴：复用树形行号分配（单子同行、多子分行），边总是从较早时间指向较晚时间
+ * 返回: { positions: [{ x, row }], minTime, maxTime, maxSpread, leftPad }
  */
-function computeLayout(graph) {
-    const positions = graph.nodes.map(() => ({ level: 0, row: -1 }));
+function computeTimeLayout(graph) {
+    const n = graph.nodes.length;
+    const nodeWidth = 36;
+    const minGap = nodeWidth + 20; // 56px，相邻节点最小水平间距，保证不重叠
+    const leftPad = 40; // 左侧留白，与节点 y 起始偏移一致
+    const positions = graph.nodes.map(() => ({ x: leftPad, row: -1 }));
 
-    // BFS 分配层级（横向位置）
-    const visited = new Set();
-    const queue = [...graph.roots];
-
-    while (queue.length > 0) {
-        const idx = queue.shift();
-        if (visited.has(idx)) continue;
-        visited.add(idx);
-
-        const node = graph.nodes[idx];
-        const currentLevel = positions[idx].level;
-
-        node.children.forEach(childIdx => {
-            if (!visited.has(childIdx)) {
-                positions[childIdx].level = Math.max(positions[childIdx].level, currentLevel + 1);
-                queue.push(childIdx);
-            }
-        });
+    if (n === 0) {
+        return { positions, totalRows: 0, minTime: 0, maxTime: 0 };
     }
 
-    // 递归分配行号（纵向位置）：树形布局
-    // 单子节点与父同行，多子节点各占一行
-    let nextRow = 0;
-
-    for (const rootIdx of graph.roots) {
-        nextRow = assignSubtreeRow(rootIdx, nextRow, graph, positions);
-    }
-
-    // 处理无法从根到达的节点（安全兜底）
-    graph.nodes.forEach((node, idx) => {
-        if (positions[idx].row === -1) {
-            positions[idx].row = nextRow++;
-        }
+    // 解析每个节点的时间戳；无效日期退化为 idx*1000ms（保证可排序且不重叠）
+    const times = graph.nodes.map((node, i) => {
+        const t = new Date(node.startTime).getTime();
+        return isNaN(t) ? i * 1000 : t;
     });
 
-    return { positions, totalRows: nextRow };
+    let minTime = Math.min(...times);
+    let maxTime = Math.max(...times);
+
+    if (n === 1) {
+        positions[0].x = leftPad;
+        positions[0].row = 0;
+        return { positions, totalRows: 1, minTime, maxTime };
+    }
+
+    let timeRange = maxTime - minTime;
+    // 时间跨度为 0（所有节点同一时刻）：退化为 1 避免 NaN，后续 minGap 间距自然展开
+    if (timeRange === 0) timeRange = 1;
+
+    // 按时间升序排序的节点索引（时间相同则按原索引稳定排序）
+    const sortedIndices = times
+        .map((t, i) => ({ t, i }))
+        .sort((a, b) => a.t - b.t || a.i - b.i)
+        .map(o => o.i);
+
+    // 时间比例宽度基准：保证平均间距不小于 minGap，并预留 200px 余量
+    const maxSpread = (n - 1) * minGap + 200;
+
+    // 计算每个节点的时间比例 X（未经 minGap 修正）
+    const rawX = {};
+    for (const idx of sortedIndices) {
+        rawX[idx] = (times[idx] - minTime) / timeRange * maxSpread;
+    }
+
+    // 从左到右遍历（按时间排序），保证相邻节点水平间距不小于 minGap
+    // 时间相近甚至相同的节点会被等距推开，避免重叠
+    for (let k = 1; k < sortedIndices.length; k++) {
+        const prev = sortedIndices[k - 1];
+        const cur = sortedIndices[k];
+        if (rawX[cur] - rawX[prev] < minGap) {
+            rawX[cur] = rawX[prev] + minGap;
+        }
+    }
+
+    // 写入最终 X（加左侧留白）
+    positions.forEach((pos, idx) => {
+        pos.x = rawX[idx] + leftPad;
+    });
+
+    // Y 轴：按全局 start_time 顺序贪心分配行号
+    // 保证时间在前的节点优先占上行，时间在后的节点依次往下排列
+    const sortedByTime = graph.nodes
+        .map((n, i) => i)
+        .sort((a, b) => {
+            const cmp = (graph.nodes[a].startTime || '').localeCompare(graph.nodes[b].startTime || '');
+            return cmp !== 0 ? cmp : a - b; // 时间相同时保持原始顺序
+        });
+
+    let nextRow = 0;
+    for (const nodeIdx of sortedByTime) {
+        if (positions[nodeIdx].row !== -1) continue; // 已分配则跳过
+
+        const node = graph.nodes[nodeIdx];
+
+        if (node.parents.length === 0) {
+            // 根节点：分配下一行
+            positions[nodeIdx].row = nextRow++;
+        } else {
+            const parentIdx = node.parents[0];
+            const parentRow = positions[parentIdx].row;
+            // 获取父节点的所有子节点
+            const siblings = graph.nodes[parentIdx].children;
+
+            if (siblings.length === 1) {
+                // 单子节点：检查配置是否变化
+                const edgeToChild = graph.edges.find(e => e.from === parentIdx && e.to === nodeIdx);
+                const configChanged = edgeToChild ? edgeToChild.configChanged : false;
+
+                if (configChanged) {
+                    // 配置变化：分配新行
+                    positions[nodeIdx].row = nextRow++;
+                } else {
+                    // 配置未变化：与父节点同行（紧凑链式）
+                    positions[nodeIdx].row = parentRow;
+                }
+            } else {
+                // 多子节点（分叉）：按 start_time 排序，最早的子继承父行（如配置未变），其余分配新行
+                const sortedSiblings = [...siblings].sort((a, b) => {
+                    const ta = graph.nodes[a].startTime || '';
+                    const tb = graph.nodes[b].startTime || '';
+                    return ta.localeCompare(tb) || a - b;
+                });
+
+                if (sortedSiblings[0] === nodeIdx) {
+                    // 最早发生的子节点：检查配置是否变化
+                    const edgeToChild = graph.edges.find(e => e.from === parentIdx && e.to === nodeIdx);
+                    const configChanged = edgeToChild ? edgeToChild.configChanged : false;
+
+                    if (configChanged) {
+                        // 配置变化：分配新行
+                        positions[nodeIdx].row = nextRow++;
+                    } else {
+                        // 配置未变化：与父节点同行（延续主线）
+                        positions[nodeIdx].row = parentRow;
+                    }
+                } else {
+                    // 非第一个子节点：分配独立新行
+                    positions[nodeIdx].row = nextRow++;
+                }
+            }
+        }
+    }
+
+    // 安全兜底：处理未被分配的节点
+    positions.forEach((pos, idx) => {
+        if (pos.row === -1) pos.row = nextRow++;
+    });
+
+    return { positions, totalRows: nextRow, minTime, maxTime, maxSpread, leftPad };
 }
 
 /**
- * 递归分配子树的行号
- * - 叶子节点占一行
- * - 单子节点：父与子同行（链式紧凑）
- * - 多子节点：每个子树独立占连续行，父在首行
- * 返回: 下一个可用行号
+ * 渲染时间轴（位于节点下方，按 minTime~maxTime 均分刻度）
+ * - 刻度像素位置遵循 computeTimeLayout 的线性时间映射（未经 minGap 修正）
+ * - 刻度数量自适应宽度（4-6 个），避免标签重叠
+ * - 复用 formatTime 格式化时间标签
  */
-function assignSubtreeRow(nodeIdx, startRow, graph, positions) {
-    const node = graph.nodes[nodeIdx];
-    const children = node.children;
+function renderTimeAxis(container, layout, axisY) {
+    const { minTime, maxTime, maxSpread, leftPad } = layout;
+    const timeRange = maxTime - minTime;
 
-    if (children.length === 0) {
-        // 叶子节点：占一行
-        positions[nodeIdx].row = startRow;
-        return startRow + 1;
+    // 刻度数量：按宽度自适应，保证每个标签有足够像素宽度
+    const minTickSpacing = 130; // 单个刻度标签所需最小像素宽度
+    let tickCount = Math.max(4, Math.min(6, Math.round(maxSpread / minTickSpacing)));
+    if (tickCount < 2) tickCount = 2;
+
+    const axisEl = document.createElement('div');
+    axisEl.className = 'dag-time-axis';
+    axisEl.style.cssText = `position:absolute;left:0;right:0;top:${axisY}px;height:24px;pointer-events:none;z-index:3;`;
+
+    // 水平基线
+    const lineEl = document.createElement('div');
+    lineEl.style.cssText = 'position:absolute;left:0;right:0;top:0;height:1px;background:var(--border-color);opacity:0.6;';
+    axisEl.appendChild(lineEl);
+
+    for (let t = 0; t < tickCount; t++) {
+        const ratio = tickCount === 1 ? 0 : t / (tickCount - 1);
+        const tickTime = minTime + ratio * timeRange;
+        const tickX = leftPad + ratio * maxSpread;
+
+        // 刻度短线
+        const tickEl = document.createElement('div');
+        tickEl.style.cssText = `position:absolute;left:${tickX}px;top:0;width:1px;height:6px;background:var(--border-color);opacity:0.6;`;
+        axisEl.appendChild(tickEl);
+
+        // 刻度文字（复用 formatTime 格式化为本地时间）
+        const labelEl = document.createElement('div');
+        labelEl.style.cssText = `position:absolute;left:${tickX}px;top:8px;transform:translateX(-50%);font-size:10px;color:var(--text-muted);white-space:nowrap;`;
+        labelEl.textContent = formatTime(tickTime);
+        axisEl.appendChild(labelEl);
     }
 
-    if (children.length === 1) {
-        // 单子节点：父与子同行（紧凑链式布局）
-        const endRow = assignSubtreeRow(children[0], startRow, graph, positions);
-        positions[nodeIdx].row = startRow;
-        return endRow;
-    }
-
-    // 多子节点：每个子树占连续行段，父节点在首行
-    let currentRow = startRow;
-    for (const childIdx of children) {
-        currentRow = assignSubtreeRow(childIdx, currentRow, graph, positions);
-    }
-    positions[nodeIdx].row = startRow;
-    return currentRow;
+    container.appendChild(axisEl);
 }
 
 /**
