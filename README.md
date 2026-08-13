@@ -13,6 +13,13 @@ TrajProxy 是一个 LLM 请求代理系统，提供 OpenAI 兼容 API、Token-in
 - **推理内容解析** - 支持思维链内容提取
 - **自定义 Parser 支持** - 支持从自定义目录按需发现和加载 parser，无需修改代码即可扩展解析能力
 
+## 🧪 在线工具
+
+| | 工具 | 说明 |
+|---|---|---|
+| 🔤 | **[Tokenizer Tool](https://versatile-ai.github.io/trajproxy/tokenizer_tool.html)** | 在线对文本进行分词，调试和分析各模型的 Token 切分结果 |
+| 🎬 | **[Replay Trajectory Viewer](https://versatile-ai.github.io/trajproxy/replay_trajectory_viewer.html)** | 回放对话请求轨迹，可视化查看完整的推理交互过程 |
+
 ## 部署视图
 
 ```mermaid
