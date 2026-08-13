@@ -138,19 +138,19 @@ def init_database():
                     tokenizer_path TEXT,
 
                     -- 阶段1: OpenAI Chat 格式
-                    messages JSONB NOT NULL,
-                    raw_request JSONB,
-                    raw_response JSONB,
+                    messages JSON NOT NULL,
+                    raw_request JSON,
+                    raw_response JSON,
 
                     -- 阶段2: 文本推理格式（Token模式）
-                    text_request JSONB,
-                    text_response JSONB,
+                    text_request JSON,
+                    text_response JSON,
 
                     -- 阶段3: Token 推理格式（Token模式）
                     prompt_text TEXT,
                     token_ids INTEGER[],
-                    token_request JSONB,
-                    token_response JSONB,
+                    token_request JSON,
+                    token_response JSON,
 
                     -- 输出数据
                     response_text TEXT,

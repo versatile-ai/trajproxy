@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 
 
 # 精简模式下不存储的冗余字段（可从其他字段导出）
-# 注意：messages 在 DDL 中为 JSONB NOT NULL，不能写 NULL。
+# 注意：messages 在 DDL 中为 JSON NOT NULL，不能写 NULL。
 # 本集合中的其他字段均为 nullable，compact 模式下可安全写 NULL。
 # 对于 messages NOT NULL 列，由 insert() 中的特殊处理改用 Json([]) 占位
 # （原始数据可从 raw_request["messages"] 完整恢复）。
@@ -312,7 +312,7 @@ class RequestRepository:
 
         与 get_by_session 不同，此方法只查询 full_conversation_text
         和 full_conversation_token_ids 两个字段，避免加载 messages、
-        raw_request 等大 JSONB 字段，大幅减少数据传输量。
+        raw_request 等大 JSON 字段，大幅减少数据传输量。
 
         查询全部历史记录，不做 LIMIT，保证前缀匹配的完整性。
 

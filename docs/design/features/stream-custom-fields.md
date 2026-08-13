@@ -14,8 +14,8 @@ TrajProxy 在流式(SSE)场景下，将推理服务的响应存入数据库时�
 
 | Pipeline | DB 字段 | 已知字段 | 自定义字段 |
 |---|---|---|---|
-| DirectPipeline | `raw_response` (JSONB) | ✅ 完整 | ⚠️ 顶级✅ choice级❌ |
-| TokenPipeline | `token_response` (JSONB) | ⚠️ 部分 | ❌ 全部丢失 |
+| DirectPipeline | `raw_response` (JSON) | ✅ 完整 | ⚠️ 顶级✅ choice级❌ |
+| TokenPipeline | `token_response` (JSON) | ⚠️ 部分 | ❌ 全部丢失 |
 
 **已知字段** = 协议标准字段 + vLLM 扩展字段（`reasoning`、`stop_reason`、`token_ids`、`logprobs` 等）
 
@@ -27,7 +27,7 @@ TrajProxy 在流式(SSE)场景下，将推理服务的响应存入数据库时�
 2. **TokenPipeline**: `token_response` 保留推理服务返回的所有自定义字段（顶级 + choice 级）
 
 **约束**：
-- 不修改数据库 schema（JSONB 列天然支持）
+- 不修改数据库 schema（JSON 列天然支持）
 - 不破坏 vLLM 对齐约束（变更在 Pipeline 层，不涉及 parser 内部）
 - 不改变客户端可见的响应结构（自定义字段仅影响 DB 存储，不影响 forward）
 
@@ -294,7 +294,7 @@ if context.stream_infer_choice_extras and "choices" in context.token_response:
 | 9 | 🟢 Minor | 安全：内部诊断字段可能入库 | 文档化说明，当前不引入 blocklist（§七.2） |
 | 10 | ℹ️ Info | vLLM 对齐无影响 | 确认变更在 Pipeline 层，不涉及 parser（§七.1） |
 | 11 | ℹ️ Info | 性能开销可忽略 | 每 chunk 约 ~10 次 dict lookup，< 1ms（§七.4） |
-| 12 | ℹ️ Info | Schema 无需变更 | JSONB 列天然支持（§七.5） |
+| 12 | ℹ️ Info | Schema 无需变更 | JSON 列天然支持（§七.5） |
 
 ---
 
@@ -312,7 +312,7 @@ if context.stream_infer_choice_extras and "choices" in context.token_response:
 
 ### 7.2 安全影响
 
-推理服务返回的所有字段（含自定义字段）将被持久化到 JSONB 列。如果推理服务返回内部诊断信息（worker ID、routing metadata 等），这些信息会被存储。
+推理服务返回的所有字段（含自定义字段）将被持久化到 JSON 列。如果推理服务返回内部诊断信息（worker ID、routing metadata 等），这些信息会被存储。
 
 **当前决策**：不引入字段黑名单。原因：
 - 推理服务是受信任的内部组件
@@ -340,7 +340,7 @@ if context.stream_infer_choice_extras and "choices" in context.token_response:
 
 ### 7.5 Schema 影响
 
-`request_details_active` 表中 `raw_response` 和 `token_response` 均为 JSONB 类型，支持任意 JSON 结构。无需 DDL 变更。
+`request_details_active` 表中 `raw_response` 和 `token_response` 均为 JSON 类型，支持任意 JSON 结构。无需 DDL 变更。
 
 ### 7.6 非流式路径（无影响）
 

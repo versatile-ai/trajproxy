@@ -343,7 +343,7 @@ class OffloadingRepository:
             blob_key: blob 存储键。
 
         Returns:
-            marker 字典，将替换原始 route_experts 存入 PG JSONB。
+            marker 字典，将替换原始 route_experts 存入 PG JSON。
         """
         if self._backend == "csb":
             return {

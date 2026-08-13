@@ -11,14 +11,14 @@
 原 `request_records` 表存储所有请求的完整轨迹数据，随着数据量增长面临以下问题：
 
 1. **查询性能下降**：按 `session_id` 或时间查询变慢
-2. **存储空间压力**：每条记录包含多个 JSONB 大字段，体积较大
+2. **存储空间压力**：每条记录包含多个 JSON 大字段，体积较大
 3. **数据管理困难**：历史数据难以清理，备份成本高
 
 ### 原表结构特点（已废弃）
 
 > 以下为原 `request_records` 单表的特征，现已迁移为双表架构。
 
-- 约 30 个字段，其中 6 个大型 JSONB 字段（`raw_request`, `raw_response`, `text_request`, `text_response`, `token_request`, `token_response`）
+- 约 30 个字段，其中 6 个大型 JSON 字段（`raw_request`, `raw_response`, `text_request`, `text_response`, `token_request`, `token_response`）
 - 单条记录约 50KB（完整数据）
 - 主要查询模式：按 `session_id` 查询、按时间范围查询、统计聚合
 

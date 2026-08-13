@@ -29,7 +29,7 @@
 
 ### 1.1 问题
 
-推理响应中的 `routed_experts` 字段（位于 `choices[0].routed_experts`）体量极大，峰值可达 **500 GB/小时**。该字段当前随 `raw_response` / `token_response` 以 JSONB 形式写入 `request_details_active` 表，带来以下风险：
+推理响应中的 `routed_experts` 字段（位于 `choices[0].routed_experts`）体量极大，峰值可达 **500 GB/小时**。该字段当前随 `raw_response` / `token_response` 以 JSON 形式写入 `request_details_active` 表，带来以下风险：
 
 - WAL 暴涨、checkpoint 阻塞、buffer pool 抖动
 - `request_details_active` 分区膨胀速度远超归档清理周期
@@ -359,7 +359,7 @@ CREATE INDEX IF NOT EXISTS idx_r3_status_consumed
     WHERE status = 'consumed';
 ```
 
-**现有表不改**：`request_metadata` / `request_details_active` / `model_registry` 完全不动。routed_experts 的 marker 自然存在 `request_details_active.raw_response` / `token_response` 的 JSONB 里，无需新列。
+**现有表不改**：`request_metadata` / `request_details_active` / `model_registry` 完全不动。routed_experts 的 marker 自然存在 `request_details_active.raw_response` / `token_response` 的 JSON 里，无需新列。
 
 ### 5.2 与现有归档机制的关系
 
@@ -460,7 +460,7 @@ route_experts_offload:
 
 - **不放 `status` 字段**：响应返回时上传总在进行中（fire-and-forget），放 `status:"uploading"` 会误导 client 以为需要轮询。小时级回拉时上传早完成，client 直接取，404 就退避重试。
 - **`_offloaded` 前缀下划线**：明确标记这是卸载占位符，不是原始数据。
-- **marker 存入 PG JSONB**：随 `raw_response` / `token_response` 自然存储，无需新列。现有 `GET /trajectories/{session_id}/records/{request_id}` 端点返回的响应里会带 marker，client 可从该端点或原始响应获取定位信息。
+- **marker 存入 PG JSON**：随 `raw_response` / `token_response` 自然存储，无需新列。现有 `GET /trajectories/{session_id}/records/{request_id}` 端点返回的响应里会带 marker，client 可从该端点或原始响应获取定位信息。
 
 ---
 
@@ -545,7 +545,7 @@ GET /trajectories/{session_id}/records/{request_id}/route_experts
 | 场景 | enabled=false（默认） | enabled=true |
 |------|----------------------|--------------|
 | Pipeline `_store_trajectory` | 原样，调裸 RequestRepository | 调 OffloadingRepository，透明抽 routed_experts |
-| routed_experts 去向 | 存入 `request_details_active` JSONB | 抽出 → 异步上传 CSB/Local → PG 存 marker |
+| routed_experts 去向 | 存入 `request_details_active` JSON | 抽出 → 异步上传 CSB/Local → PG 存 marker |
 | `GET .../records/{id}` 返回 | 完整 routed_experts 原值 | marker `{"_offloaded": true, "backend": ..., "location": ...}` |
 | `GET .../records/{id}/route_experts` | 404（无引用行） | 200 流式返回 / 202 上传中 |
 | client 直访存储 | N/A（routed_experts 在 PG） | CSB：三步认证 GET；Local：open(path) |
