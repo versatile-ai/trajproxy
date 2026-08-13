@@ -123,7 +123,7 @@ insert_test_data() {
             INSERT INTO request_details_active (
                 unique_id, created_at, messages
             ) VALUES (
-                '${unique_id}', '${created_at}', '[{\"role\": \"user\", \"content\": \"test message\"}]'::jsonb
+                '${unique_id}', '${created_at}', '[{\"role\": \"user\", \"content\": \"test message\"}]'::json
             )
             ON CONFLICT DO NOTHING;
         "
