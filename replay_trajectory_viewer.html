@@ -3128,6 +3128,8 @@ function buildRelationGraph(records) {
     for (let j = 0; j < records.length; j++) {
         let bestParent = -1;
         let bestParentLen = 0;
+        // 等长匹配时用 start_time 做 tie-breaker（取请求时间更晚的候选）
+        let bestParentTime = -Infinity;
 
         const childMsgs = getRecordMessages(records[j]);
         if (childMsgs.length === 0) continue;
@@ -3149,9 +3151,21 @@ function buildRelationGraph(records) {
             }
 
             // 只取最长匹配前缀作为直接前驱（保证只有前后轮连线，无跨轮连线）
-            if (match && parentMsgs.length > bestParentLen) {
-                bestParent = i;
-                bestParentLen = parentMsgs.length;
+            // 多个候选长度相等时，取 start_time 更晚（更靠近当前轮）的那条，
+            // 避免遍历数组顺序引入的不确定性。
+            if (match) {
+                const candidateTime = new Date(records[i].start_time).getTime();
+                const candidateTimeValid = !isNaN(candidateTime);
+                const betterByLen = parentMsgs.length > bestParentLen;
+                const betterByTime =
+                    parentMsgs.length === bestParentLen &&
+                    candidateTimeValid &&
+                    candidateTime > bestParentTime;
+                if (betterByLen || betterByTime) {
+                    bestParent = i;
+                    bestParentLen = parentMsgs.length;
+                    bestParentTime = candidateTimeValid ? candidateTime : -Infinity;
+                }
             }
         }
 
