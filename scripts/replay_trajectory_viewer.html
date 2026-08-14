@@ -3538,20 +3538,28 @@ function computeTimeLayout(graph) {
             const siblings = graph.nodes[parentIdx].children;
 
             if (siblings.length === 1) {
-                // 单子节点：检查配置是否变化
+                // 单子节点：检查配置是否变化以及是否为 spawn 边
                 const edgeToChild = graph.edges.find(e => e.from === parentIdx && e.to === nodeIdx);
                 const configChanged = edgeToChild ? edgeToChild.configChanged : false;
+                const isSpawn = edgeToChild ? edgeToChild.isSpawn : false;
 
-                if (configChanged) {
-                    // 配置变化：分配新行
+                if (isSpawn || configChanged) {
+                    // spawn 边或配置变化：分配新行
                     positions[nodeIdx].row = nextRow++;
                 } else {
-                    // 配置未变化：与父节点同行（紧凑链式）
+                    // 普通对话延续且配置未变：与父节点同行
                     positions[nodeIdx].row = parentRow;
                 }
             } else {
-                // 多子节点（分叉）：按 start_time 排序，最早的子继承父行（如配置未变），其余分配新行
+                // 多子节点（分叉）：非 spawn 边优先继承父行（主对话延续），spawn 边强制新行
+                // 排序规则：先按是否 spawn 边分组（非 spawn 在前），同组内按 start_time 排序
                 const sortedSiblings = [...siblings].sort((a, b) => {
+                    const edgeA = graph.edges.find(e => e.from === parentIdx && e.to === a);
+                    const edgeB = graph.edges.find(e => e.from === parentIdx && e.to === b);
+                    const spawnA = edgeA ? edgeA.isSpawn : false;
+                    const spawnB = edgeB ? edgeB.isSpawn : false;
+                    // 非 spawn 边优先（继承父行），spawn 边排后（强制新行）
+                    if (spawnA !== spawnB) return spawnA ? 1 : -1;
                     const ta = graph.nodes[a].startTime || '';
                     const tb = graph.nodes[b].startTime || '';
                     return ta.localeCompare(tb) || a - b;
