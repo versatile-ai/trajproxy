@@ -114,6 +114,7 @@
     }
     .badge-primary { background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
     .badge-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
 
     /* ==================== 自定义下拉框 ==================== */
     .custom-dropdown {
@@ -1062,6 +1063,10 @@
             <button class="btn-primary" id="btnFetch" onclick="fetchSessions()">
                 <span>&#128269;</span> 查询
             </button>
+            <button class="btn-primary" id="btnImport" onclick="importLocalFiles()" title="从本地导入 Session JSON 文件" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 0 8px rgba(139,92,246,0.25);">
+                <span>&#128193;</span> 导入
+            </button>
+            <input type="file" id="localFileInput" accept=".json,application/json" multiple style="display:none" onchange="handleFileImport(this.files)">
             <button class="btn-secondary" id="btnDownload" onclick="downloadAllSessions()" title="下载所有 Session 为 JSON 文件" style="display:none">下载</button>
             <span class="download-progress" id="downloadProgress" style="display:none"></span>
             <button class="btn-secondary" onclick="clearAll()">重置</button>
@@ -1082,7 +1087,7 @@
         <div class="session-list" id="sessionList">
             <div class="empty-state">
                 <div class="empty-icon">&#128193;</div>
-                <div class="empty-text">输入 MY_JOB_NAME(Run ID) 开始查询</div>
+                <div class="empty-text">输入 Run ID 查询 或 <span style="color:#818cf8;cursor:pointer" onclick="importLocalFiles()">导入本地 JSON</span></div>
             </div>
         </div>
     </aside>
@@ -1532,17 +1537,8 @@ async function fetchSessions() {
 
         sessions.sort((a, b) => (b.last_request_time || '').localeCompare(a.last_request_time || ''));
 
-        listEl.innerHTML = sessions.map((s, i) => `
-            <div class="session-item" data-idx="${i}" data-session-id="${escapeHtml(s.session_id)}" onclick="selectSession(${i})">
-                <div class="session-id">${escapeHtml(s.session_id)}</div>
-                <div class="session-meta">
-                    <span>${s.record_count} 记录</span>
-                    <span>${formatTime(s.last_request_time)}</span>
-                </div>
-            </div>
-        `).join('');
-
         window._sessions = sessions;
+        renderSessionList();
         document.getElementById('sessionSearch').value = ''; // 清空搜索框
         document.getElementById('btnDownload').style.display = '';
         document.getElementById('downloadProgress').style.display = 'none';
@@ -1550,6 +1546,151 @@ async function fetchSessions() {
     } catch (e) {
         listEl.innerHTML = `<div style="padding:20px;color:var(--danger);text-align:center">请求失败: ${escapeHtml(e.message)}</div>`;
         showToast('查询失败', 'error');
+    }
+}
+
+/**
+ * 统一渲染 session 侧边栏列表（remote + local 通用）
+ * 读取 window._sessions，按 _local 标志区分显示 badge
+ */
+function renderSessionList() {
+    const sessions = window._sessions || [];
+    const listEl = document.getElementById('sessionList');
+    const badge = document.getElementById('sessionCount');
+
+    badge.textContent = sessions.length;
+    badge.style.display = sessions.length ? 'inline-block' : 'none';
+
+    if (sessions.length === 0) {
+        listEl.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">&#128196;</div>
+                <div class="empty-text">未找到 Session 数据</div>
+            </div>`;
+        return;
+    }
+
+    listEl.innerHTML = sessions.map((s, i) => {
+        const isLocal = !!s._local;
+        const localBadge = isLocal ? '<span class="badge badge-success" style="margin-left:6px;padding:1px 6px;font-size:10px;">Local</span>' : '';
+        const recordCount = isLocal ? (s._localRecords ? s._localRecords.length : 0) : (s.record_count || 0);
+        const timeStr = isLocal
+            ? (s._localRecords && s._localRecords.length
+                ? formatTime(s._localRecords[s._localRecords.length - 1].start_time)
+                : '刚刚')
+            : formatTime(s.last_request_time);
+        return `
+            <div class="session-item" data-idx="${i}" data-session-id="${escapeHtml(s.session_id)}" onclick="selectSession(${i})">
+                <div class="session-id">${escapeHtml(s.session_id)}${localBadge}</div>
+                <div class="session-meta">
+                    <span>${recordCount} 记录</span>
+                    <span>${timeStr}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * 导入本地 JSON 文件：触发文件选择器
+ */
+function importLocalFiles() {
+    const input = document.getElementById('localFileInput');
+    // 清空旧值，使同一文件可重复选入
+    input.value = '';
+    input.click();
+}
+
+/**
+ * 处理用户选择的本地 JSON 文件，解析后追加到 window._sessions
+ * 与远程 session 共存，通过 _local + _localRecords 标志区分
+ */
+async function handleFileImport(files) {
+    if (!files || files.length === 0) return;
+
+    if (!Array.isArray(window._sessions)) window._sessions = [];
+
+    let successCount = 0;
+    let failCount = 0;
+    const addedSessions = [];
+
+    for (const file of files) {
+        try {
+            const text = await file.text();
+            if (!text || !text.trim()) {
+                console.warn(`[Import] 跳过空文件: ${file.name}`);
+                failCount++;
+                continue;
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (e) {
+                console.warn(`[Import] JSON 解析失败: ${file.name} -`, e.message);
+                failCount++;
+                continue;
+            }
+
+            // 兼容两种格式：{records:[...]} 或 顶部即数组
+            let records;
+            let sessionMeta = {};
+            if (Array.isArray(parsed)) {
+                records = parsed;
+            } else if (parsed && Array.isArray(parsed.records)) {
+                records = parsed.records;
+                // 其他顶层字段当作 session 元信息
+                Object.keys(parsed).forEach(k => {
+                    if (k !== 'records') sessionMeta[k] = parsed[k];
+                });
+            } else {
+                console.warn(`[Import] 未识别的数据结构: ${file.name}`);
+                failCount++;
+                continue;
+            }
+
+            if (records.length === 0) {
+                console.warn(`[Import] 文件中没有记录: ${file.name}`);
+                failCount++;
+                continue;
+            }
+
+            // 排序
+            records.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+
+            // 推导 session_id：优先用 records 中的 session_id，其次用文件名
+            let sessionId = sessionMeta.session_id || records[0].session_id;
+            if (!sessionId) {
+                sessionId = file.name.replace(/\.json$/i, '') || `local-${Date.now()}`;
+            }
+
+            addedSessions.push({
+                session_id: sessionId,
+                record_count: records.length,
+                last_request_time: records[records.length - 1].start_time || null,
+                _local: true,
+                _localRecords: records,
+                _sourceFile: file.name,
+                ...sessionMeta,
+            });
+            successCount++;
+        } catch (e) {
+            console.warn(`[Import] 处理文件失败: ${file.name} -`, e);
+            failCount++;
+        }
+    }
+
+    if (addedSessions.length > 0) {
+        // 追加到现有列表（保留远程查询结果）
+        window._sessions = window._sessions.concat(addedSessions);
+        renderSessionList();
+        document.getElementById('sessionSearch').value = '';
+        document.getElementById('btnDownload').style.display = '';
+        showToast(
+            `导入完成: ${successCount} 个 Session 已加载` + (failCount ? `, ${failCount} 个文件失败` : ''),
+            successCount ? 'success' : 'error'
+        );
+    } else {
+        showToast(`导入失败: ${failCount} 个文件都无法解析`, 'error');
     }
 }
 
@@ -1592,8 +1733,15 @@ async function selectSession(idx) {
     closeTrajectory();
 
     try {
-        const data = await apiGet(`/trajectories/${encodeURIComponent(session.session_id)}`);
-        let records = data.records || [];
+        let records;
+        if (session._local && Array.isArray(session._localRecords)) {
+            // 导入的本地 session：直接使用预加载的记录，无需网络请求
+            records = session._localRecords.slice();
+        } else {
+            // 远程 session：走原有 API 路径
+            const data = await apiGet(`/trajectories/${encodeURIComponent(session.session_id)}`);
+            records = data.records || [];
+        }
         records.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 
         currentRecords = records;
@@ -1964,12 +2112,13 @@ function clearAll() {
     document.getElementById('runIdDropdown').innerHTML = '';
     loadedRunIdData = null;
     document.getElementById('sessionSearch').value = '';
-    document.getElementById('sessionList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128193;</div><div class="empty-text">输入 MY_JOB_NAME(Run ID) 开始查询</div></div>';
+    document.getElementById('sessionList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128193;</div><div class="empty-text">输入 Run ID 查询 或 <span style="color:#818cf8;cursor:pointer" onclick="importLocalFiles()">导入本地 JSON</span></div></div>';
     document.getElementById('recordList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128200;</div><div class="empty-text">在左侧选择 Session 查看轨迹详情</div></div>';
     document.getElementById('sessionCount').style.display = 'none';
     document.getElementById('recordNav').style.display = 'none';
     document.getElementById('btnDownload').style.display = 'none';
     document.getElementById('downloadProgress').style.display = 'none';
+    document.getElementById('localFileInput').value = '';
     closeTrajectory();
     window._sessions = [];
     currentRecords = [];
