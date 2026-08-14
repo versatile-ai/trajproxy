@@ -1207,8 +1207,9 @@ const CONFIG_COLORS = [
     '#ec4899', // 粉色
     '#14b8a6', // 蓝绿
 ];
-const EDGE_SAME_CONFIG_COLOR = '#475569';  // 同配置连线颜色 (Slate 600)
+const EDGE_SAME_CONFIG_COLOR = '#94a3b8';  // 同配置连线颜色 (Slate 400，深色背景下清晰可见)
 const EDGE_DIFF_CONFIG_COLOR = '#f97316';  // 不同配置连线颜色 (橙色警告)
+const EDGE_SPAWN_COLOR = '#a78bfa';        // 子 Agent spawn 边颜色 (Violet-400，时间回退推断的 spawn 来源)
 
 const stringStore = new Map(); // 存储 long string / array 引用，避免 DOM 属性膨胀
 let stringStoreId = 0;
@@ -3012,7 +3013,48 @@ function buildRelationGraph(records) {
                 from: bestParent,
                 to: j,
                 configChanged: nodes[bestParent].configGroup !== nodes[j].configGroup,
+                isSpawn: false,
                 fromGroup: nodes[bestParent].configGroup,
+                toGroup: nodes[j].configGroup
+            });
+        }
+    }
+
+    // 第二遍：对 orphan 记录（无 message prefix 匹配的父节点），尝试"时间回退"spawn 边
+    // 场景：子 agent 被父 agent 通过 task/subagent 工具 spawn 出来，
+    // 其系统消息和 messages 与父 agent 完全不同，无法通过前缀匹配找到 parent；
+    // 但时间上紧接父 agent 的某次对话，所以用"时间在前的最近记录"作为 spawn 来源。
+    for (let j = 0; j < records.length; j++) {
+        if (nodes[j].parents.length > 0) continue;  // 已有 parent，跳过
+
+        const childTime = new Date(records[j].start_time).getTime();
+        if (isNaN(childTime)) continue;
+
+        // 在所有 start_time < childTime 的记录中找最近的（任意 record 都可能是 spawn 来源）
+        // 注意：子 agent 链的头节点虽然没有 prefix parent，但可能有 prefix children，
+        // 这里不检查 children.length，否则子 agent 链的头部 spawn 边会丢失。
+        // （真正的第一条根记录无 predecessor，bestSpawn 自然为 -1，由 if (bestSpawn>=0) 兜底）
+        let bestSpawn = -1;
+        let bestSpawnTime = -Infinity;
+        for (let i = 0; i < records.length; i++) {
+            if (i === j) continue;
+            const t = new Date(records[i].start_time).getTime();
+            if (isNaN(t) || t >= childTime) continue;
+            if (t > bestSpawnTime) {
+                bestSpawnTime = t;
+                bestSpawn = i;
+            }
+        }
+
+        if (bestSpawn >= 0) {
+            nodes[bestSpawn].children.push(j);
+            nodes[j].parents.push(bestSpawn);
+            edges.push({
+                from: bestSpawn,
+                to: j,
+                configChanged: nodes[bestSpawn].configGroup !== nodes[j].configGroup,
+                isSpawn: true,
+                fromGroup: nodes[bestSpawn].configGroup,
                 toGroup: nodes[j].configGroup
             });
         }
@@ -3075,7 +3117,7 @@ function renderDAG(graph) {
     }
 
     // 为每种连线颜色动态创建箭头 marker
-    const markerColors = [EDGE_SAME_CONFIG_COLOR, EDGE_DIFF_CONFIG_COLOR];
+    const markerColors = [EDGE_SAME_CONFIG_COLOR, EDGE_DIFF_CONFIG_COLOR, EDGE_SPAWN_COLOR];
     // 不同配置组间连线也用各组的颜色 marker（用于节点边框高亮）
     for (let g = 0; g < graph.configGroupCount; g++) {
         markerColors.push(CONFIG_COLORS[g] || CONFIG_COLORS[0]);
@@ -3151,8 +3193,9 @@ function renderDAG(graph) {
         const toX = toNode._leftX;          // 子节点左侧
         const toY = toNode._centerY;        // 子节点垂直中心
 
-        // 判断是否为分叉：父节点有多个子节点
+        // 判断是否为分叉或 spawn：父节点有多个子节点，或当前边是 spawn 边
         const isFork = graph.nodes[edge.from].children.length > 1;
+        const isForkOrSpawn = isFork || edge.isSpawn;
         // 判断是否换行：父与子不在同一行
         const parentRow = fromNode._centerY;
         const childRow = toNode._centerY;
@@ -3160,7 +3203,7 @@ function renderDAG(graph) {
 
         let fromX, fromY, pathData;
 
-        if (isFork && rowChanged) {
+        if (isForkOrSpawn && rowChanged) {
             // 分叉且换行：从父节点底部中心出发
             fromX = fromNode._bottomX;
             fromY = fromNode._bottomY;
@@ -3179,7 +3222,14 @@ function renderDAG(graph) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', pathData);
 
-        if (edge.configChanged) {
+        if (edge.isSpawn) {
+            // 子 agent spawn 边：紫色点划线（父 agent 通过 subagent/task 工具创建子 agent）
+            path.setAttribute('stroke', EDGE_SPAWN_COLOR);
+            path.setAttribute('stroke-width', '1.5');
+            path.setAttribute('stroke-dasharray', '5,2,1,2');
+            path.setAttribute('fill', 'none');
+            path.setAttribute('marker-end', `url(#arrow-${EDGE_SPAWN_COLOR.replace('#', '')})`);
+        } else if (edge.configChanged) {
             // 配置变更连线：橙色虚线（醒目提示 system 或 tools 参数不一致）
             path.setAttribute('stroke', EDGE_DIFF_CONFIG_COLOR);
             path.setAttribute('stroke-width', '2.5');
@@ -3223,6 +3273,10 @@ function renderDAG(graph) {
     legendHtml += `<div style="display:flex;align-items:center;gap:6px;">
         <span style="width:24px;height:0;border-top:2.5px dashed ${EDGE_DIFF_CONFIG_COLOR};display:inline-block;"></span>
         <span style="color:var(--text-main);">配置变更(Sys/Tools)</span>
+    </div>`;
+    legendHtml += `<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+        <span style="width:24px;height:0;border-top:1.5px dotted ${EDGE_SPAWN_COLOR};display:inline-block;"></span>
+        <span style="color:var(--text-main);">子 Agent Spawn</span>
     </div>`;
     legendHtml += '</div>';
 
